@@ -5,11 +5,16 @@ from Autocompletion import *
 
 window_keys = ["right shift", "up", "down"]
 
+def setup_hotkeys(sending_pipe):
+    keyboard.add_hotkey("command+[", sending_pipe.send, args=("selection L",))
+    keyboard.add_hotkey("command+]", sending_pipe.send, args=("selection R",))
+    keyboard.add_hotkey("right shift", sending_pipe.send, args=("autocomplete",))
+
 class OptionsWindow:
     """
     Contains the autocompletion window and some methods for interacting with it
     """
-    def __init__(self, in_pipe, update_rate, exit_code):
+    def __init__(self, in_pipe, update_rate, exit_code, UI_input):
         """
         in_pipe is the sending conn2 of a non-duplex pipe, and update_rate is like FPS, pass 60 for 60 updates per second
         """
@@ -21,6 +26,7 @@ class OptionsWindow:
         self.exit_code = exit_code
         self.last_typed = ""
         self.selected = 0
+        self.UI_input = UI_input
 
     def text_complete(self, typed, to_type):
         keyboard.write(to_type[len(typed):])
@@ -30,30 +36,44 @@ class OptionsWindow:
         Beef of the class, gets input from in_pipe and displays them as labels. Also captures user input
         """
         if self.in_pipe.poll():
+            # list option input
             new_updates = self.in_pipe.recv()
-            # Ugly condition ladder. I wish Python had switch-case
-            if new_updates == "up":
-                self.selected -= 1
+            while self.in_pipe.poll():
+                new_updates = self.in_pipe.recv()
 
-            elif new_updates == "down":
-                self.selected += 1
-
-            elif new_updates == "right shift": # Autocomplete
-                self.text_complete(self.last_typed, self.currently_displaying[self.selected % len(self.currently_displaying)]["text"])
-                self.setup_display([])
-
-            elif new_updates == self.exit_code: # destroy
+            if new_updates == "esc": # terminate
                 self.window.destroy()
                 return
 
-            else:
-                self.setup_display(new_updates[0])
-                self.last_typed = new_updates[1]
+            self.setup_display(new_updates[0])
+            self.last_typed = new_updates[1]
 
+            # update display
             for label in self.currently_displaying:
                 label["bg"] = "white"
 
-            self.currently_displaying[self.selected % len(self.currently_displaying)]["bg"] = "black"
+            if len(self.currently_displaying) > 0:
+                self.currently_displaying[self.selected % len(self.currently_displaying)]["bg"] = "black"
+        
+        if self.UI_input.poll():
+            # user input
+            user_input = self.UI_input.recv()
+            while self.UI_input.poll():
+                user_input = self.UI_input.recv()
+            
+            if user_input == "selection L":
+                self.selected -= 1
+            elif user_input == "selection R":
+                self.selected += 1
+            elif user_input == "autocomplete":
+                self.text_complete(self.last_typed, self.currently_displaying[self.selected % len(self.currently_displaying)]["text"])
+
+            # update display
+            for label in self.currently_displaying:
+                label["bg"] = "white"
+
+            if len(self.currently_displaying) > 0:
+                self.currently_displaying[self.selected % len(self.currently_displaying)]["bg"] = "black"
             
         self.window.after(int(1000/self.update_rate), self.update)
 
@@ -85,11 +105,14 @@ if __name__=="__main__":
     q = mp.Queue()
 
     conn1, conn2 = mp.Pipe(False)
+    input_out, input_in = mp.Pipe(False)
+
+    setup_hotkeys(input_in)
 
     tracker = AutocompletionCalculator(q, 'esc', conn2, "libWordTree.dylib", "word_list.txt")
 
-    window = OptionsWindow(conn1, 20, "esc")
+    window = OptionsWindow(conn1, 20, "esc", input_out)
     tracker.start()
     keyboard.start_recording(q)
-    print("Ready!")
+    
     window.start()
