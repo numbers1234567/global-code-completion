@@ -35,9 +35,10 @@ class AutocompletionCalculator(mp.Process):
                     self.send_pipe.send(self.exit_code)
                     return True
 
-                # Ignore
-                if key_pressed.name in key_ignore:
+                if key_pressed.name in terminating_keys: # Terminate events
                     self.key_events = []
+                    continue
+                elif key_pressed.name in key_ignore: # Ignore key
                     continue
                 else:
                     self.key_events.append(key_pressed)
