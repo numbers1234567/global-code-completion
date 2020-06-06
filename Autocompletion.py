@@ -3,7 +3,8 @@ import multiprocessing as mp
 import queue
 import ctypes
 
-window_keys = ["right shift", "up", "down"]
+terminating_keys = ["right shift", "up", "down", "enter", "tab"]
+key_ignore = ["[", "]"] # Keys to ignore for constructing string. 
 
 class AutocompletionCalculator(mp.Process):
     """
@@ -23,22 +24,22 @@ class AutocompletionCalculator(mp.Process):
     def run(self):
         library = ctypes.CDLL(self.tree_library_path)
         library.get_autocomplete.restype = ctypes.c_char_p
-        cstring = ctypes.create_string_buffer(b"word_list.txt")
+        cstring = ctypes.create_string_buffer(bytes(self.word_list_path, "utf-8"))
         library.set_tree(cstring)
 
         while True:
             # Figure out keys pressed
             try:
                 key_pressed = self.in_queue.get(block=True, timeout=self.key_timeout) # block-timeout so the loop isn't unnecessarily busy
-                if key_pressed == self.exit_code or key_pressed.name == self.exit_code: # Exit
+                if key_pressed == self.exit_code or key_pressed.name == self.exit_code: # Exit case
                     self.send_pipe.send(self.exit_code)
                     return True
 
-                # Check if up/down input or shift
-                if key_pressed.name in window_keys and key_pressed.event_type != "up": # Have the graphical interface (main thread) respond to these
-                    self.send_pipe.send(key_pressed.name)
-
-                if len(key_pressed.name) == 1 or key_pressed.name == "space":
+                # Ignore
+                if key_pressed.name in key_ignore:
+                    self.key_events = []
+                    continue
+                else:
                     self.key_events.append(key_pressed)
 
             except queue.Empty:
