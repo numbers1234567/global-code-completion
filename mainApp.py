@@ -1,6 +1,8 @@
 import tkinter as tk
 import keyboard
 import multiprocessing as mp
+import queue
+import time
 from Autocompletion import *
 
 window_keys = ["right shift", "up", "down"]
@@ -14,7 +16,7 @@ class OptionsWindow:
     """
     Contains the autocompletion window and some methods for interacting with it
     """
-    def __init__(self, in_pipe, update_rate, exit_code, UI_input):
+    def __init__(self, in_pipe, update_rate, exit_code, UI_input, key_record_queue):
         """
         in_pipe is the sending conn2 of a non-duplex pipe, and update_rate is like FPS, pass 60 for 60 updates per second
         """
@@ -27,9 +29,19 @@ class OptionsWindow:
         self.last_typed = ""
         self.selected = 0
         self.UI_input = UI_input
+        self.key_record_queue = key_record_queue
 
     def text_complete(self, typed, to_type):
-        keyboard.write(to_type[len(typed):])
+        # Write keys but force anything else reading from queue to ignore that crap
+        keyboard_capture_lock.acquire()
+        keyboard.write(to_type[len(typed):]+" ")
+        while not self.key_record_queue.empty(): # Empty queue
+            self.key_record_queue.get()
+        while self.in_pipe.poll():
+            self.in_pipe.recv()
+        keyboard_capture_lock.release()
+
+        self.setup_display([])
 
     def update(self):
         """
@@ -111,7 +123,7 @@ if __name__=="__main__":
 
     tracker = AutocompletionCalculator(q, 'esc', conn2, "libWordTree.dylib", "word_list.txt")
 
-    window = OptionsWindow(conn1, 20, "esc", input_out)
+    window = OptionsWindow(conn1, 20, "esc", input_out, q)
     tracker.start()
     keyboard.start_recording(q)
     
