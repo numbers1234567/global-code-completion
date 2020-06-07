@@ -3,8 +3,10 @@ import multiprocessing as mp
 import queue
 import ctypes
 
-terminating_keys = ["right shift", "up", "down", "enter", "tab"]
-key_ignore = ["[", "]"] # Keys to ignore for constructing string. 
+terminating_keys = ["up", "down", "enter", "tab"]
+key_ignore = ["[", "]", "command"] # Keys to ignore for constructing string. 
+
+keyboard_capture_lock = mp.Lock() # A lock in case artificial keyboard input is being given
 
 class AutocompletionCalculator(mp.Process):
     """
@@ -22,6 +24,7 @@ class AutocompletionCalculator(mp.Process):
         self.exit_code = exit_code
 
     def run(self):
+        # Set up library
         library = ctypes.CDLL(self.tree_library_path)
         library.get_autocomplete.restype = ctypes.c_char_p
         cstring = ctypes.create_string_buffer(bytes(self.word_list_path, "utf-8"))
@@ -30,20 +33,29 @@ class AutocompletionCalculator(mp.Process):
         while True:
             # Figure out keys pressed
             try:
-                key_pressed = self.in_queue.get(block=True, timeout=self.key_timeout) # block-timeout so the loop isn't unnecessarily busy
+                key_pressed = " "
+                if keyboard_capture_lock.acquire(block=False):
+                    key_pressed = self.in_queue.get()
+                    keyboard_capture_lock.release()
+                else:
+                    self.key_events = []
+                    continue
+
+                # Special cases
                 if key_pressed == self.exit_code or key_pressed.name == self.exit_code: # Exit case
                     self.send_pipe.send(self.exit_code)
                     return True
 
-                if key_pressed.name in terminating_keys: # Terminate events
+                if key_pressed.name in terminating_keys: # Terminator
                     self.key_events = []
                     continue
-                elif key_pressed.name in key_ignore: # Ignore key
+                elif key_pressed.name in key_ignore: # Ignore
                     continue
                 else:
                     self.key_events.append(key_pressed)
 
             except queue.Empty:
+                key_board_capture_lock.release()
                 continue # Avoid creating a new typed string
             
             except:
@@ -55,6 +67,7 @@ class AutocompletionCalculator(mp.Process):
             while True:
                 try:
                     typed = next(typed_string_gen).split(" ")[-1]
+                    #print(typed)
 
                 except StopIteration:
                     # Waits until a StopIteration exception before doing calculations
